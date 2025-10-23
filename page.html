@@ -1,0 +1,90 @@
+<div id="wufoo-r1ove9610ot73cn">
+  <script src="https://cdn.docuseal.com/js/form.js"></script>
+  <a href="https://zazen.wufoo.com/forms/r1ove9610ot73cn">Wufoo online form</a>.
+</div>
+<docuseal-form data-src="https://docuseal.com/d/ahwB3agsU4PB6g"></docuseal-form>
+<button id="submitBtn" disabled>Submit</button>
+
+<script type="text/javascript">
+  var r1ove9610ot73cn;
+
+  (function(d, t) {
+    const s = d.createElement(t), options = {
+      'userName': 'zazen',
+      'formHash': 'r1ove9610ot73cn',
+      'autoResize': true,
+      'height': '647',
+      'async': true,
+      'host': 'wufoo.com',
+      'header': 'show',
+      'ssl': true
+    };
+
+    s.src = ('https:' === d.location.protocol ? 'https://' : 'http://') + 'static.wufoo.com/scripts/embed/form.js';
+    s.onload = s.onreadystatechange = function() {
+      const rs = this.readyState; 
+      if (rs) if (rs !== 'complete') if (rs !== 'loaded') return;
+      try { 
+        r1ove9610ot73cn = new WufooForm();
+        r1ove9610ot73cn.initialize(options);
+        r1ove9610ot73cn.display(); 
+      } catch (e) {
+        console.error("Wufoo Form Initialization Error:", e);
+      }
+    };
+    const scr = d.getElementsByTagName(t)[0], par = scr.parentNode; 
+    par.insertBefore(s, scr);
+  })(document, 'script');
+</script>
+
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    const docusealForm = document.querySelector('docuseal-form');
+    const button = document.getElementById('submitBtn');
+    let isDocuSealSigned = false;
+    let isWufooFilled = false;
+
+    function changeButtonStatus() {
+      console.log(`isDocuSealSigned: ${isDocuSealSigned}, isWufooFilled: ${isWufooFilled}`);
+      if (isDocuSealSigned && isWufooFilled) {
+        button.disabled = false;
+        button.textContent = "Proceed";
+      } else {
+        button.disabled = true;
+        button.textContent = "Incomplete";
+      }
+    }
+
+    if (docusealForm) {
+      console.log("Setting up Docuseal event listener");
+      docusealForm.addEventListener('docuseal:submit', function() {
+        isDocuSealSigned = true;
+        console.log("DocuSeal form has been signed");
+        changeButtonStatus();
+      });
+    } else {
+      console.error("Docuseal form not found");
+    }
+
+    function onWufooSubmit() {
+      isWufooFilled = true;
+      changeButtonStatus();
+      console.log("Wufoo form is filled");
+    }
+
+    window.addEventListener('message', function(event) {
+      console.log("Message received:", event.data);
+      if (event.origin.includes('wufoo.com') && event.data.type === 'wufooFormSubmission') {
+        onWufooSubmit();
+      }
+    });
+
+    button.addEventListener('click', function() {
+      if (!button.disabled) {
+        console.log("Both forms have been filled");
+      }
+    });
+
+    changeButtonStatus(); 
+  });
+</script>
