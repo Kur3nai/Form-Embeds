@@ -1,9 +1,14 @@
-import os, requests, sys, json, shutil
-from subprocess import PIPE, run
+import json, requests, logging, os, sys
 from urllib.parse import parse_qs
-from dotenv import load_dotenv
 
-load_dotenv()
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+
+first_name_field = os.environ['FIRST_NAME_FIELD']
+last_name_field = os.environ['LAST_NAME_FIELD']
+email_field = os.environ['EMAIL_FIELD']
+identification_type_field = os.environ['IDENTIFICATION_TYPE_FIELD']
+identification_number_field = os.environ['IDENTIFICATION_NUMBER_FIELD']
 
 def get_wufoo_json(entry_id):
     subdomain = os.environ.get('WUFOO_SUBDOMAIN') 
@@ -21,20 +26,20 @@ def get_wufoo_json(entry_id):
 
 def prepare_docuseal_data(wufoo_json):
     try:
-        template_id = os.environ.get['DOCUSEAL_TEMPLATE_ID']
-        
+        template_id = os.environ['DOCUSEAL_TEMPLATE_ID']
         field_mappings = {
-            'Field6': 'First Name', 
-            'Field7': 'Last Name', 
-            'Field9': 'Email',  
+            first_name_field: 'First Name', 
+            last_name_field: 'Last Name', 
+            email_field: 'Email', 
+            identification_type_field: 'ID Type', 
+            identification_number_field: 'ID Number', 
         }
         
-        f_name = wufoo_json.get('Field6', '') 
-        l_name = wufoo_json.get('Field7', '') 
-        email = wufoo_json.get('Field9', '') 
-        
-        if not email:
-            raise ValueError("Missing required email from Wufoo data")
+        first_name = wufoo_json.get(first_name_field) 
+        last_name = wufoo_json.get(last_name_field) 
+        email = wufoo_json.get(email_field) 
+        id_type = wufoo_json.get(identification_type_field) 
+        id_number = wufoo_json.get(identification_number_field) 
         
         values = {}
         for wufoo_id, docuseal_name in field_mappings.items():
@@ -43,14 +48,16 @@ def prepare_docuseal_data(wufoo_json):
         
         data = {
             "template_id": int(template_id),
-            "send_email": True,
+            "send_email": False,
             "submitters": [
                 {
-                    "first_name": f_name,
-                    "last_name": l_name,
+                    "first_name": first_name,
+                    "last_name": last_name,
                     "email": email,
-                    "role": "First Party",  
-                    "values": values  
+                    "id_type": id_type,
+                    "id_number": id_number,
+                    "role": "Signer",
+                    "values": values 
                 }
             ]
         }
@@ -68,11 +75,14 @@ def prepare_docuseal_data(wufoo_json):
 
 def send_to_docuseal(docuseal_data):
     url = "https://api.docuseal.com/submissions"
-    api_key = os.environ.get('')
+    api_key = os.environ.get('DOCUSEAL_API_KEY')
+    if not api_key:
+        raise ValueError("Missing or empty DOCUSEAL_API_KEY environment variable")
     headers = {
         "X-Auth-Token": api_key,
         "Content-Type": "application/json"
     }
+    logger.info(f"Sending to DocuSeal with headers: {headers}")
     response = requests.post(url, json=docuseal_data, headers=headers)
     response.raise_for_status()
     return response.json()
@@ -81,15 +91,25 @@ def extract_submission_link(response):
     try:
         print("Response received in extract_submission_link:", json.dumps(response, indent=2)) 
 
-        first_entry = response[0]  
+        if isinstance(response, list):
+            submitters = response
+        else:
+            submitters = response.get('submitters', [])
         
-        embed_src = first_entry['embed_src'] 
+        if not submitters:
+            raise ValueError("No submitters in response")
+        
+        first_submitter = submitters[0]
+        if not isinstance(first_submitter, dict):
+            raise ValueError("First submitter is not a dictionary")
+        
+        embed_src = first_submitter['embed_src']  
         
         return embed_src
-        
+    
     except IndexError:
         raise ValueError("Expected response to be a non-empty list")
-
+    
     except KeyError:
         raise ValueError("No 'embed_src' in the first entry")
         
@@ -97,27 +117,42 @@ def extract_submission_link(response):
         print(f"Unexpected error in extract_submission_link: {str(e)}")
         raise
 
-def main():
-    query_string = os.environ.get('QUERY_STRING', '')
-    params = parse_qs(query_string)
-    entry_id = '13'  # This is for testing purpose, later on change it to a dynamic by adding a parameter. e.g. EntID
+def lambda_handler(event, context):
+    query_params = event.get('queryStringParameters', {}) or {}
+    
+    entry_id = query_params.get('entryId') 
+    
     if not entry_id:
-        print("Content-Type: text/plain\n")
-        print("Error: No entry_id provided in query parameter (?entry=EntryId)")
-        return
+        return {
+            'statusCode': 400,
+            'headers': {'Content-Type': 'text/plain'},
+            'body': 'Error: No entry_id provided in query parameter (?entry=EntryId)'
+        }
 
     try:
         wufoo_json = get_wufoo_json(entry_id)
+        logger.info("Wufoo JSON: " + json.dumps(wufoo_json, indent=2))
+        print("Fetch Data Successful")
+        
         docuseal_data = prepare_docuseal_data(wufoo_json)
+        print("Success Preparing Json")
+        
         docuseal_response = send_to_docuseal(docuseal_data)
-        print("Docuseal Response:", json.dumps(docuseal_response, indent=2))
+        logger.info("Docuseal Response: " + json.dumps(docuseal_response, indent=2))
+        
         submission_link = extract_submission_link(docuseal_response)
-        print("Content-Type: text/plain\n")
-        print(submission_link)
+        print("Submission link Created")
+
+        return {
+            'statusCode': 302,
+            'headers': {'Location': submission_link},
+            'body': ''
+        }
         
     except Exception as e:
-        print("Content-Type: text/plain\n")
-        print(f"Error: {str(e)}")
-
-if __name__ == "__main__":
-    main()
+        logger.error(str(e))
+        return {
+            'statusCode': 500,
+            'headers': {'Content-Type': 'text/plain'},
+            'body': f'Error: {str(e)}'
+        }
